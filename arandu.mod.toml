@@ -12,9 +12,12 @@ profiles = ["conventional", "performance"]
 [permissions]
 # It answers requests and reads its own rows. Nothing leaves the process.
 network = false
-# It keeps no state outside the database.
+# sandbox.go gives one attempt a writable tree of its own: it copies the task in,
+# then reads and writes files under that root and nowhere else.
 filesystem = true
-# It runs no other program.
+# sandbox.go runs `go test` inside that tree to find out whether an attempt
+# actually worked. This is the widest thing the package does, and it is the point
+# of the package.
 exec = true
 # module.go owns the attempts table, so whoever installs this has to run
 # `aru migrate`. Declaring it is how they find that out before deploying.

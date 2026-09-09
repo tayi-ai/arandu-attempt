@@ -10,7 +10,9 @@
 //	model.go       -> the entity, and what it may answer with
 //	policy.go      -> who may do what
 //	service.go     -> the rules and Model access, after authorization
-//	views.go       -> the files the application takes ownership of
+//	sandbox.go     -> the writable tree an attempt is confined to
+//	trajectory.go  -> what an attempt did, recorded step by step
+//	runner.go      -> one attempt, executed and replayed
 //
 // An application registers it explicitly. There is no service provider, no
 // container and no discovery: the wiring is three lines somebody wrote, and
@@ -20,9 +22,7 @@ package attempt
 import (
 	"context"
 	"errors"
-	"fmt"
 	stdhttp "net/http"
-	"strings"
 
 	"github.com/arandu-io/framework/data"
 	"github.com/arandu-io/framework/foundation"
@@ -31,7 +31,6 @@ import (
 	"github.com/arandu-io/framework/validation"
 	"github.com/arandu-io/hesape/database/migrations"
 	"github.com/arandu-io/hesape/database/schema"
-	"github.com/arandu-io/hesape/view"
 )
 
 // Module is what the application registers.
@@ -40,12 +39,11 @@ import (
 // that pair is the whole public contract between a package and the framework.
 //
 // It also implements foundation.Migratable, because it owns a table, and
-// foundation.Publishable, because it hands view sources to the project. The
+// foundation.Bootable, because it is asked before the application serves. The
 // other optional interfaces are declared beside Module in the framework and are
-// opted into the same way, by implementing them: Bootable to prepare state at
-// boot, Background to run a loop of its own, Schedulable to declare work for
-// the scheduler, Health to report on the storage it depends on, Closable to
-// give resources back at shutdown.
+// opted into the same way, by implementing them: Background to run a loop of
+// its own, Schedulable to declare work for the scheduler, Health to report on
+// the storage it depends on, Closable to give resources back at shutdown.
 type Module struct {
 	cfg      Config
 	svc      *AttemptService
@@ -54,10 +52,9 @@ type Module struct {
 
 // Compile-time proof that the module honors the contracts it claims.
 var (
-	_ foundation.Module      = (*Module)(nil)
-	_ foundation.Migratable  = (*Module)(nil)
-	_ foundation.Bootable    = (*Module)(nil)
-	_ foundation.Publishable = (*Module)(nil)
+	_ foundation.Module     = (*Module)(nil)
+	_ foundation.Migratable = (*Module)(nil)
+	_ foundation.Bootable   = (*Module)(nil)
 )
 
 // New returns the module, or the reason it cannot be built.
@@ -104,67 +101,21 @@ func (m *Module) Routes(r *fhttp.Router) {
 	r.Action(stdhttp.MethodPost, m.cfg.Prefix, m.store).Name("attempt.store")
 }
 
-// PublishCommand is what an application runs to take ownership of the views
-// this package offers.
+// Boot is where this module states, before the application serves, that it has
+// nothing to prepare.
 //
-// It is spelled out as a constant so that whatever says it -- the refusal
-// below, or a message an application writes for its own operators -- says one
-// thing. A person who is told two different commands for one job tries both.
+// It answers with JSON and ships no view, so there is no published file to
+// check for and no install step that could have been skipped. A view would be
+// published under a path with a segment named vendor, and the go command
+// refuses to import a package from there -- so the page would be a file nobody
+// could compile against, and the check that it had been compiled would be a
+// check nobody could ever pass.
 //
-// The command reads the modules the application registered and writes what each
-// one declares, which is why it is the application's command and not this
-// package's: nothing outside the application knows which modules it holds.
-const PublishCommand = "aru vendor:publish --apply"
-
-// Boot refuses to serve when a view this package renders is not in the binary.
-//
-// A compiled view registers itself from init(), so by the time anything boots
-// the question has one answer already: either the application published the
-// files, compiled them and imported the package they became, or it did not.
-// Asking here turns "did anybody run the install command" into one refusal at
-// start-up that names the views and the command, instead of a 500 on the first
-// request that reached one of them -- which is where it used to be answered,
-// once per page, to whoever happened to open it.
-//
-// It also holds the destination. Every file the archive offers has to land
-// under the vendor directory named after this module: an archive that reached
-// resources/views/home.kyse.go would land on a page the application wrote, and
-// what publishes the files writes what the archive says.
+// The method is kept, and the Bootable contract with it, because the thing it
+// would guard is a real one: state prepared once at start-up belongs here,
+// where a refusal costs one restart, rather than in the first request that
+// needed it.
 func (m *Module) Boot(context.Context) error {
-	prefix := viewPrefix + "/"
-	var stray []string
-	for _, path := range PublishedPaths() {
-		if !strings.HasPrefix(path, prefix) {
-			stray = append(stray, path)
-		}
-	}
-	if len(stray) > 0 {
-		return fmt.Errorf("attempt: %s would be published outside %s, where it lands on a file the application wrote",
-			strings.Join(stray, ", "), prefix)
-	}
-
-	registered := make(map[string]bool)
-	for _, name := range view.Registered() {
-		registered[name] = true
-	}
-	var missing []string
-	for _, name := range ViewNames() {
-		if !registered[name] {
-			missing = append(missing, name)
-		}
-	}
-	if len(missing) > 0 {
-		// The compiled packages are named because the import is the half of the
-		// install nothing else can do: the command writes the sources, the view
-		// compiler turns them into Go, and a package the application does not
-		// import is not linked at all.
-		imports := make([]string, 0, len(ViewPackages()))
-		for _, pkg := range ViewPackages() {
-			imports = append(imports, "<module path>/"+pkg)
-		}
-		return fmt.Errorf("attempt: no view is registered as %s. Run `%s`, then `aru view:build`, then import %s in bootstrap/app.go",
-			strings.Join(missing, ", "), PublishCommand, strings.Join(imports, ", "))
-	}
 	return nil
 }
 
