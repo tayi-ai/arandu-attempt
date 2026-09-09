@@ -13,7 +13,7 @@ import (
 	"github.com/arandu-io/framework/security"
 	"github.com/arandu-io/hesape/database/migrations"
 
-	attempt "github.com/hyz-is/arandu-attempt"
+	attempt "github.com/tayi-ai/arandu-attempt"
 )
 
 // These tests drive the module the way an application does: build it, register

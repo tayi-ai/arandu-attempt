@@ -1,6 +1,6 @@
 ---
 name: attempt-package
-description: Install, wire and use the Arandu Attempt package (Go, Arandu) in an application. Use when the request is to "install Arandu Attempt", "add attempt to the app", "go get github.com/hyz-is/arandu-attempt", "wire it into bootstrap/app.go", "register the module", "use the attempt routes", "everything under /attempt returns 403", "403 forbidden from attempt", "the table does not exist", "no such table", "change where it is mounted", "let admins read it", or when a project's go.mod already requires github.com/hyz-is/arandu-attempt. Covers the three lines of wiring and where each one goes, the Config fields and which one is required, the routes and their names, why the policy refuses everything until somebody opens it, and the migration step that is not optional.
+description: Install, wire and use the Arandu Attempt package (Go, Arandu) in an application. Use when the request is to "install Arandu Attempt", "add attempt to the app", "go get github.com/tayi-ai/arandu-attempt", "wire it into bootstrap/app.go", "register the module", "use the attempt routes", "everything under /attempt returns 403", "403 forbidden from attempt", "the table does not exist", "no such table", "change where it is mounted", "let admins read it", or when a project's go.mod already requires github.com/tayi-ai/arandu-attempt. Covers the three lines of wiring and where each one goes, the Config fields and which one is required, the routes and their names, why the policy refuses everything until somebody opens it, and the migration step that is not optional.
 license: MIT
 ---
 
@@ -14,7 +14,7 @@ happen.
 ## Install
 
 ```bash
-go get github.com/hyz-is/arandu-attempt
+go get github.com/tayi-ai/arandu-attempt
 ```
 
 ## The three lines of wiring, and where each one goes
@@ -26,7 +26,7 @@ The import, with the other module imports:
 
 ```go
 import (
-	attempt "github.com/hyz-is/arandu-attempt"
+	attempt "github.com/tayi-ai/arandu-attempt"
 )
 ```
 
@@ -158,7 +158,7 @@ answers 200 with an empty body is not something it does.
 ## Reporting a problem
 
 Issues and pull requests go to the repository the module path names,
-`github.com/hyz-is/arandu-attempt`, which belongs to `hyz-is`. A vulnerability goes to the
+`github.com/tayi-ai/arandu-attempt`, which belongs to `hyz-is`. A vulnerability goes to the
 private advisory form named in that repository's `SECURITY.md`, and never into
 an issue.
 

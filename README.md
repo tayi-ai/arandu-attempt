@@ -6,7 +6,7 @@ for itself who may reach either.
 ## Install
 
 ```bash
-go get github.com/hyz-is/arandu-attempt
+go get github.com/tayi-ai/arandu-attempt
 ```
 
 ## Wire it
@@ -19,7 +19,7 @@ The import, with the other module imports:
 
 ```go
 import (
-	attempt "github.com/hyz-is/arandu-attempt"
+	attempt "github.com/tayi-ai/arandu-attempt"
 )
 ```
 

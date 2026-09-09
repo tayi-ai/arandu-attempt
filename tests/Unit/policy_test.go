@@ -10,7 +10,7 @@ import (
 	"github.com/arandu-io/framework/security"
 	"github.com/arandu-io/hesape/database/model"
 
-	attempt "github.com/hyz-is/arandu-attempt"
+	attempt "github.com/tayi-ai/arandu-attempt"
 )
 
 // The four properties this package exists to keep are checked here, and they

@@ -1,4 +1,4 @@
-module github.com/hyz-is/arandu-attempt
+module github.com/tayi-ai/arandu-attempt
 
 go 1.26
 
