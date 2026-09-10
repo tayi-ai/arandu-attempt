@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"regexp"
 	"strings"
 	"time"
 )
@@ -207,20 +206,16 @@ func (r Runner) execute(ctx context.Context, task Task, box *Sandbox, index int,
 			return fail(err)
 		}
 		obs.IsError = !result.Passed
-		obs.Output = fmt.Sprintf("passed=%t exit=%d\n%s", result.Passed, result.ExitCode, stableTestOutput(result.Output))
+		// result.Output arrives already normalised. That used to happen here and
+		// covered durations only, which was the whole list until a panicking test
+		// was measured and turned out to carry stack addresses and the sandbox
+		// path as well. It belongs in Sandbox, which is what knows where the
+		// sandbox is.
+		obs.Output = fmt.Sprintf("passed=%t exit=%d\n%s", result.Passed, result.ExitCode, result.Output)
 	default:
 		return refuse(fmt.Errorf("attempt: %q is not a tool of this sandbox; the tools are %s", call.Tool, strings.Join(AllTools(), ", ")))
 	}
 	return obs
-}
-
-// elapsed matches the durations `go test` prints ("0.004s", "(cached)"), which
-// are the only part of its output that differs between two runs of the same
-// sandbox. They are replaced so a replay can be compared byte for byte.
-var elapsed = regexp.MustCompile(`\b\d+\.\d+s\b|\(cached\)`)
-
-func stableTestOutput(s string) string {
-	return elapsed.ReplaceAllString(s, "<elapsed>")
 }
 
 func isRefusal(err error) bool {

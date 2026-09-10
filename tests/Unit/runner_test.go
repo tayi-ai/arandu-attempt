@@ -217,3 +217,60 @@ func TestDigestIsStableAcrossArgumentOrder(t *testing.T) {
 		t.Fatal("digest depends on map iteration order")
 	}
 }
+
+// A replay has to agree with the record when the test panics, and that is the
+// case it used to fail on.
+//
+// `go test` prints a panic as a stack trace, and a stack trace carries the
+// absolute path the binary was compiled from. The sandbox is a fresh temporary
+// directory per attempt, so the record names one directory and the replay names
+// another -- the digests differ, Verify reports a divergence, and the
+// divergence is the runner's own rather than the policy's. Measured on
+// 2026-09-10 as two lines of the trace naming the attempt directory.
+//
+// A compile error does not do this: the go command prints those relative to its
+// working directory, which is the sandbox root.
+func TestReplayAgreesWhenTheTestPanics(t *testing.T) {
+	r := runner(t)
+	task := fixtureTask(t)
+	budget := attempt.Budget{MaxToolCalls: 8, MaxTestRuns: 4}
+
+	panicking := "package fixture\n\n" +
+		"// Accept panics, which is what puts an absolute path in the output.\n" +
+		"func Accept(fromClient, masked bool) error { panic(\"boom\") }\n"
+
+	agent := attempt.Scripted([]attempt.ToolCall{
+		{Tool: attempt.ToolWriteFile, Args: map[string]any{"path": "frame.go", "content": panicking}},
+		{Tool: attempt.ToolRunTests, Args: map[string]any{"package": "."}},
+	}, "it panics", nil)
+
+	recorded, err := r.Run(context.Background(), task, budget, "v-panic", agent)
+	if err != nil {
+		t.Fatalf("running the attempt: %v", err)
+	}
+	if recorded.Reward.TestsPassed {
+		t.Fatal("the fixture was made to panic and the tests reported passing")
+	}
+
+	var testOutput string
+	for _, step := range recorded.Steps {
+		if step.Observation.Tool == attempt.ToolRunTests {
+			testOutput = step.Observation.Output
+		}
+	}
+	if !strings.Contains(testOutput, "panic") {
+		t.Fatalf("the recorded output does not show the panic: %q", testOutput)
+	}
+	// The sandbox is created with os.MkdirTemp(parent, "attempt-"), so its name
+	// is the string that would differ between the two runs.
+	if strings.Contains(testOutput, "attempt-") {
+		t.Fatalf("the recorded output still names the sandbox directory: %q", testOutput)
+	}
+	if !strings.Contains(testOutput, "<sandbox>") {
+		t.Fatalf("the sandbox path was never substituted, so the trace lost its file names: %q", testOutput)
+	}
+
+	if err := r.Verify(context.Background(), task, budget, recorded); err != nil {
+		t.Fatalf("a faithful replay of a panicking attempt was reported as divergent: %v", err)
+	}
+}
