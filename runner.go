@@ -45,6 +45,17 @@ func (r Runner) Run(ctx context.Context, task Task, budget Budget, policyVersion
 	if err := validateTask(task); err != nil {
 		return Trajectory{}, err
 	}
+	// The snapshot is sealed before it is copied and checked after the attempt
+	// ends. It is the one tree that outlives the attempt: the sandbox is a copy
+	// and is removed, but the snapshot is what every later attempt starts from,
+	// so a test process that writes into it poisons the whole run and not one
+	// episode. Nothing in the sandbox API can reach it, and RunTests does not
+	// go through the sandbox API.
+	sealed, err := sealTree(task.Snapshot)
+	if err != nil {
+		return Trajectory{}, err
+	}
+
 	root, err := CopyTree(task.Snapshot, r.parent())
 	if err != nil {
 		return Trajectory{}, err
@@ -55,7 +66,33 @@ func (r Runner) Run(ctx context.Context, task Task, budget Budget, policyVersion
 		return Trajectory{}, err
 	}
 	traj := Trajectory{TaskID: task.ID, PolicyVersion: policyVersion}
-	return r.drive(ctx, task, budget, box, agent, traj)
+	traj, err = r.drive(ctx, task, budget, box, agent, traj)
+	if err != nil {
+		return traj, err
+	}
+
+	after, err := sealTree(task.Snapshot)
+	if err != nil {
+		return traj, err
+	}
+	if after != sealed {
+		// Not a reward of zero: a reward of zero is a scored attempt that failed,
+		// and this one was not scored. Whatever the tests said, they ran against a
+		// snapshot that is no longer the one the task names.
+		traj.Reward = Reward{
+			Refused:   true,
+			ToolCalls: len(traj.Steps),
+			Reason:    "refused: the task snapshot changed during the attempt; every reading from it is void",
+		}
+	}
+	return traj, nil
+}
+
+// sealTree hashes a directory the way Sandbox seals a reserved subtree, for the
+// one tree that lives outside the sandbox.
+func sealTree(root string) (string, error) {
+	box := &Sandbox{root: root}
+	return box.digestReserved(".")
 }
 
 // Replay re-executes a recorded trajectory's calls on a fresh copy of the
@@ -230,9 +267,41 @@ func isRefusal(err error) bool {
 // delivered but lied about the path is worth less than one that said nothing.
 func (r Runner) reward(ctx context.Context, task Task, box *Sandbox, traj Trajectory) Reward {
 	rw := Reward{ToolCalls: len(traj.Steps)}
+
+	// The seal is checked on both sides of the final test run, and it has to be
+	// both.
+	//
+	// Confine refuses a reserved path on every tool call, and that is a boundary
+	// for the tools only. RunTests executes code the policy wrote, as this user,
+	// with this user's filesystem -- so the reserved list is invisible to it and
+	// a policy that wants to rewrite the test that judges it never needs a tool
+	// call to do it. It needs an `init()`.
+	//
+	// Before catches an earlier `run_tests` in the trajectory that moved the
+	// evaluation. After catches this run doing it, which is the interesting
+	// case: the write happens while the tests are running, so a check that
+	// stopped at "before" reads a sealed tree, runs the tests against a tree
+	// that is about to change, and scores the result. It measured exactly that
+	// and reported a score of 1.
+	//
+	// This does not prevent the write. It refuses the attempt. RULE 10.
+	if err := box.VerifySeal(); err != nil {
+		rw.Refused = true
+		rw.Reason = "refused: " + err.Error()
+		return rw
+	}
+
 	result, err := box.RunTests(ctx, task.TestPackage, r.timeout())
 	if err != nil {
 		rw.Reason = "final tests could not run: " + err.Error()
+		return rw
+	}
+	if err := box.VerifySeal(); err != nil {
+		// The result is discarded rather than reported. Whatever it says, it was
+		// produced by a run that changed what judges it, and the two cannot be
+		// told apart from the outside.
+		rw.Refused = true
+		rw.Reason = "refused: " + err.Error()
 		return rw
 	}
 	rw.TestsPassed = result.Passed

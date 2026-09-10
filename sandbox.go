@@ -3,6 +3,8 @@ package attempt
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -32,6 +34,18 @@ type Sandbox struct {
 	// reserved lists relative prefixes that must never be read or written:
 	// the evaluation itself, held-out material, repositories kept out of training.
 	reserved []string
+	// sealed is what the reserved subtrees hashed to before the attempt started.
+	//
+	// Confine is a boundary for the tools and not for the attempt. RunTests
+	// executes `go test`, which compiles and runs code the policy wrote, as this
+	// user, with this user's access to the filesystem -- so the reserved list,
+	// the allowed-files list and every path check are invisible to it. A policy
+	// that wants to rewrite the test that judges it does not need a tool call.
+	//
+	// This is the part that can be checked rather than prevented: what the
+	// reserved subtrees contained before, compared with what they contain after.
+	// It does not stop the write. It stops the reward.
+	sealed map[string]string
 }
 
 // ErrOutside is returned for a path that resolves outside the sandbox.
@@ -67,7 +81,113 @@ func NewSandbox(root string, allowedWrite []string, reserved []string) (*Sandbox
 	for _, p := range reserved {
 		s.reserved = append(s.reserved, strings.TrimSuffix(path.Clean(filepath.ToSlash(p)), "/"))
 	}
+	if err := s.seal(); err != nil {
+		return nil, err
+	}
 	return s, nil
+}
+
+// ErrReservedChanged is returned when a reserved subtree is not what it was.
+//
+// It is separate from ErrReserved because they describe different events: one
+// is a tool call refused at the boundary, the other is a boundary that was
+// bypassed and only shows up afterwards.
+var ErrReservedChanged = errors.New("attempt: a reserved path changed during the attempt")
+
+// seal records what each reserved subtree contains, before anything runs.
+func (s *Sandbox) seal() error {
+	s.sealed = map[string]string{}
+	for _, prefix := range s.reserved {
+		sum, err := s.digestReserved(prefix)
+		if err != nil {
+			return err
+		}
+		s.sealed[prefix] = sum
+	}
+	return nil
+}
+
+// VerifySeal reports whether every reserved subtree is still what it was.
+//
+// A reserved path that is absent stays absent and a reserved path that existed
+// keeps its contents; either changing is the same finding. Deleting the
+// evaluation is not a smaller offence than rewriting it.
+func (s *Sandbox) VerifySeal() error {
+	for _, prefix := range s.reserved {
+		sum, err := s.digestReserved(prefix)
+		if err != nil {
+			return err
+		}
+		if sum != s.sealed[prefix] {
+			return fmt.Errorf("%w: %s", ErrReservedChanged, prefix)
+		}
+	}
+	return nil
+}
+
+// digestReserved hashes one reserved subtree: every path under it, in sorted
+// order, with its contents.
+//
+// The path goes into the hash beside the contents, so a file renamed within
+// the subtree is a change even when the bytes are the same. Symlinks are
+// hashed by their target and never followed -- following one would hash
+// whatever it points at, which is the thing a symlink is used to hide.
+//
+// An absent subtree hashes to the empty string, which is what makes "absent
+// before and absent after" agree without a special case.
+func (s *Sandbox) digestReserved(prefix string) (string, error) {
+	root := filepath.Join(s.root, filepath.FromSlash(prefix))
+	if _, err := os.Lstat(root); errors.Is(err, fs.ErrNotExist) {
+		return "", nil
+	}
+	sum := sha256.New()
+	walked := []string{}
+	contents := map[string][]byte{}
+	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		rel, err := filepath.Rel(root, p)
+		if err != nil {
+			return err
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		switch {
+		case info.Mode()&fs.ModeSymlink != 0:
+			target, err := os.Readlink(p)
+			if err != nil {
+				return err
+			}
+			walked = append(walked, "l "+rel)
+			contents[rel] = []byte(target)
+		case d.IsDir():
+			walked = append(walked, "d "+rel)
+		default:
+			body, err := os.ReadFile(p)
+			if err != nil {
+				return err
+			}
+			walked = append(walked, "f "+rel)
+			contents[rel] = body
+		}
+		return nil
+	})
+	if err != nil {
+		return "", err
+	}
+	sort.Strings(walked)
+	for _, entry := range walked {
+		sum.Write([]byte(entry))
+		sum.Write([]byte{0})
+		if body, ok := contents[entry[2:]]; ok {
+			sum.Write(body)
+		}
+		sum.Write([]byte{0})
+	}
+	return hex.EncodeToString(sum.Sum(nil)), nil
 }
 
 // Root is the confined directory.
