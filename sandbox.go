@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -193,12 +194,25 @@ func (s *Sandbox) RunTests(ctx context.Context, pkg string, timeout time.Duratio
 	cmd := exec.CommandContext(ctx, "go", "test", "-count=1", "./"+filepath.ToSlash(path.Clean(pkg)))
 	cmd.Dir = s.root
 	cmd.Env = append(os.Environ(), "GOWORK=off", "GOPROXY=off", "GOFLAGS=-mod=mod", "GOTOOLCHAIN=local")
+
+	// `go test` compiles a binary and runs it as a child of its own, and the test
+	// may spawn more. CommandContext kills the process it started and nothing
+	// below it, so a timeout used to end the attempt whilst the test binary kept
+	// running -- recorded as bounded, actually still going, sharing the machine
+	// with whatever ran next. The group is what reaches them.
+	detach(cmd)
+	cmd.Cancel = func() error { return killGroup(cmd) }
+	// The group is signalled, then the pipes are given a moment to drain before
+	// Wait gives up on them. Without a delay, a grandchild holding the write end
+	// open makes Wait block past the timeout it was supposed to enforce.
+	cmd.WaitDelay = 5 * time.Second
+
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &out
 	started := time.Now()
 	err := cmd.Run()
-	result := TestResult{Package: pkg, Output: out.String(), Elapsed: time.Since(started)}
+	result := TestResult{Package: pkg, Output: s.stable(out.String()), Elapsed: time.Since(started)}
 	var exit *exec.ExitError
 	switch {
 	case err == nil:
@@ -209,6 +223,43 @@ func (s *Sandbox) RunTests(ctx context.Context, pkg string, timeout time.Duratio
 		return result, err
 	}
 	return result, nil
+}
+
+// Everything in a test run's output that differs between two runs of the same
+// sandbox, so that a replay can be compared against a record byte for byte.
+//
+// Each of these was measured on 2026-09-10 by running the same panicking test
+// twice and diffing, rather than guessed:
+//
+//   - durations, which the go command prints for every package ("0.350s"
+//     against "0.133s"), and "(cached)" when it skips the run entirely
+//   - addresses in a panic's stack trace, which move with ASLR on every
+//     execution: `panic({0x102a278d8?, 0x1029fc3c0?})` against
+//     `panic({0x100e9b8d8?, 0x100e703c0?})`
+//   - goroutine numbers, which depend on how many the runtime started first
+//   - the sandbox root, a fresh temporary directory per attempt, which a stack
+//     trace carries as the absolute path the binary was compiled from
+//
+// A compile error needs none of this: the go command prints those relative to
+// its working directory, which is the root.
+//
+// Left unnormalised, a replay's digest differs from the record's for reasons
+// that have nothing to do with what the policy did, and Verify reports a
+// divergence that is its own -- an accusation against a policy that did exactly
+// what it was recorded doing.
+var (
+	elapsed    = regexp.MustCompile(`\b\d+\.\d+s\b|\(cached\)`)
+	address    = regexp.MustCompile(`0x[0-9a-f]{4,}`)
+	goroutines = regexp.MustCompile(`\bgoroutine \d+\b`)
+)
+
+func (s *Sandbox) stable(output string) string {
+	if s.root != "" {
+		output = strings.ReplaceAll(output, s.root, "<sandbox>")
+	}
+	output = elapsed.ReplaceAllString(output, "<elapsed>")
+	output = address.ReplaceAllString(output, "0x<addr>")
+	return goroutines.ReplaceAllString(output, "goroutine <n>")
 }
 
 // CopyTree copies src into a fresh directory under parent and returns it.
