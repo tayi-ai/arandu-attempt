@@ -62,8 +62,9 @@ this one must prove about itself it proves in its own suite or nowhere.
 
 | | measured with |
 | --- | --- |
-| 8 Go files, one per role, all in one package at the root | `grep -l '^package attempt' *.go` |
-| 6 test files, 38 passing tests and 3 skipped | `find tests -name '*_test.go' -not -path '*/fixtures/*'` · `go test -count=1 ./... -v \| grep -c '^--- PASS'` |
+| 10 Go files, one per role plus the per-OS sandbox, in one package at the root | `grep -l '^package attempt' *.go` |
+| 2 library subpackages with no routes, no Model and no database: `answer` (numeric answer verifier) and `comparison` (paired statistics) | `ls -d */*.go | cut -d/ -f1 | sort -u` |
+| 13 test files, 97 passing tests and 3 skipped | `find tests -name '*_test.go' -not -path '*/fixtures/*'` · `go test -count=1 ./... -v \| grep -c '^--- PASS'` |
 | 3 routes | `grep -c 'r.Action' module.go` |
 | 5 actions the policy answers about | `grep -cE '^\t[A-Za-z]+ security.Action = ' policy.go` |
 | 2 direct dependencies, both under `arandu-io` | `go list -m -f '{{if and (not .Indirect) (not .Main)}}{{.Path}} {{.Version}}{{end}}' all` |
