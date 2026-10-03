@@ -56,7 +56,7 @@ opened by nothing but that package's own suite.
 
 ```toml
 name = "tayi-ai/attempt"
-framework = ">= 0.46"
+framework = ">= 0.50"
 profiles = ["conventional", "performance"]
 
 [permissions]

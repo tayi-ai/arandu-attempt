@@ -5,14 +5,15 @@
 // The files are laid out by role rather than by layer, so the whole package
 // reads top to bottom:
 //
-//	module.go      -> registration, routes, handlers and migrations
-//	config.go      -> what the application passes in
-//	model.go       -> the entity, and what it may answer with
-//	policy.go      -> who may do what
-//	service.go     -> the rules and Model access, after authorization
-//	sandbox.go     -> the writable tree an attempt is confined to
-//	trajectory.go  -> what an attempt did, recorded step by step
-//	runner.go      -> one attempt, executed and replayed
+//	module.go       -> registration, routes, handlers and migrations
+//	config.go       -> what the application passes in
+//	model.go        -> the entity, and what it may answer with
+//	AttemptQuery.go -> the generated query of the entity, never edited
+//	policy.go       -> who may do what
+//	service.go      -> the rules and Model access, after authorization
+//	sandbox.go      -> the writable tree an attempt is confined to
+//	trajectory.go   -> what an attempt did, recorded step by step
+//	runner.go       -> one attempt, executed and replayed
 //
 // An application registers it explicitly. There is no service provider, no
 // container and no discovery: the wiring is three lines somebody wrote, and

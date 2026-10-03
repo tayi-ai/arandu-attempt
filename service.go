@@ -7,7 +7,6 @@ import (
 	"github.com/arandu-io/framework/data"
 	"github.com/arandu-io/framework/security"
 	"github.com/arandu-io/framework/validation"
-	"github.com/arandu-io/hesape/database/model"
 )
 
 // Pagination bounds for List. A request that asks for everything gets the
@@ -88,11 +87,10 @@ func (s *AttemptService) Create(ctx context.Context, actor security.Subject, in 
 	if proposed.ID, err = data.NewID(); err != nil {
 		return nil, err
 	}
-	instance, err := Attempts(s.db).NewInstance(nil, false)
+	candidate, err := Attempts(s.db).New()
 	if err != nil {
 		return nil, err
 	}
-	candidate := instance.Entity
 	candidate.ID = proposed.ID
 	candidate.TenantID = data.Tenant(g)
 	candidate.Name = proposed.Name
@@ -122,7 +120,7 @@ func (s *AttemptService) Find(ctx context.Context, actor security.Subject, id st
 		return nil, err
 	}
 
-	record, err := Attempts(s.db).NewQuery().WhereKey(id).First(ctx, g)
+	record, err := Attempts(s.db).WhereKey(id).First(ctx, g)
 	if err != nil {
 		return nil, err
 	}
@@ -166,19 +164,18 @@ func (s *AttemptService) List(ctx context.Context, actor security.Subject, q dat
 		limit = maxLimit
 	}
 
-	rows := Attempts(s.db)
-	page := rows.NewQuery()
+	page := Attempts(s.db)
 	if q.Cursor != "" {
-		anchor, err := rows.NewQuery().WhereKey(q.Cursor).Value(ctx, g, column)
+		anchor, err := Attempts(s.db).WhereKey(q.Cursor).Value(ctx, g, column)
 		if err != nil {
 			return nil, err
 		}
 		if anchor == nil {
 			return nil, nil
 		}
-		page = page.Where(func(after *model.Builder[Attempt]) {
+		page = page.Where(func(after *AttemptQuery) {
 			after.Where(column, ">", anchor).
-				OrWhere(func(equal *model.Builder[Attempt]) {
+				OrWhere(func(equal *AttemptQuery) {
 					equal.Where(column, "=", anchor).Where("id", ">", q.Cursor)
 				})
 		})
