@@ -1,6 +1,6 @@
 # Upgrade Guide
 
-## Unreleased
+## v0.2.0
 
 ### The attempt is a concrete type over the non-generic model
 
