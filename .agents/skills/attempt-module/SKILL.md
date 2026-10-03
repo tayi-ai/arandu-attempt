@@ -109,27 +109,34 @@ request.
 
 ## Changing the Model
 
-`Attempt` embeds `model.Model[Attempt]`, and `Attempts(db)` is the one
-configured entry point for the table. Keep the application-generated key
-settings and tenant default visible there:
+`Attempt` embeds `model.Model`, and its table is declared once beside it in
+`model.go`. Keep the application-generated key setting and the tenant default
+visible there:
 
 ```go
-func Attempts(db *data.DB) *model.Model[Attempt] {
-	m := model.NewModel[Attempt]("attempts", db, db.GetQueryGrammar(), db.GetPostProcessor())
-	m.KeyType = "string"
-	m.Incrementing = false
-	return m
-}
+var attemptTable = model.NewTable(model.TableSpec{
+	Name:      "attempts",
+	New:       func() model.Entity { return new(Attempt) },
+	ManualKey: true,
+})
 ```
 
-Do not set `TenantColumn` to `""`: this package owns tenant data. Model
-terminals require a Grant and apply `tenant_id`; the Service still calls
-`security.Authorize` first because the Model does not decide which Policy
-action the Grant represents.
+`func Attempts(db model.DB) *AttemptQuery` is the one entry point for that
+table. It is generated, with `AttemptQuery` and `AttemptCollection`, into
+`AttemptQuery.go` by `aru model:build`; never edit that file. After changing
+the entity or its table, run `aru model:build` and commit the regenerated file
+with the change, and `aru model:build --check` exits non-zero while it is stale.
 
-Keep rows as pointers after `NewInstance`, `First`, `Find`, or `Get`. The
-embedded Model's `Entity` points into that allocation, so copying the row and
-then calling a promoted terminal would act on the original.
+Do not set `Global`: this package owns tenant data, and `Global` is the only
+setting that drops the tenant filter. Model terminals require a Grant and apply
+`tenant_id`; the Service still calls `security.Authorize` first because the
+Model does not decide which Policy action the Grant represents.
+
+Keep rows as pointers after `New`, `First`, `Find`, or `Get`. A copy of the row
+still reads its fields, but every write promoted from its embedded Model refuses
+with `model.ErrUnwired`: the copy is not the row the table built. Never assign
+over a row that `New` returned (`*row = other`): that replaces its embedded
+Model with the other value's, and the row can no longer save.
 
 This table declares `created_at` but not `updated_at`. The Hesape Model stamps a
 timestamp only when the entity declares its column, so creation remains correct
